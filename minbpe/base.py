@@ -4,14 +4,20 @@ The base class also contains the (common) save/load functionality.
 It would be possible to be a lot more strict about the interface and
 e.g. isolating all regex/pattern parts to the RegexTokenizer, but
 some concessions are made for simplicity.
+
+BPE算法：The BPE algorithm is "byte-level" because it runs on UTF-8 encoded strings
 """
 import unicodedata
+from typing import List,Optional,Dict,Tuple
+
 
 # -----------------------------------------------------------------------------
 # a few helper functions useful for both BasicTokenizer and RegexTokenizer
 
-def get_stats(ids, counts=None):
+def get_bigram_stats(ids:List[int], counts:Optional[Dict[int,int]]=None):
     """
+    统计所有的2-gram出现次数
+
     Given a list of integers, return a dictionary of counts of consecutive pairs
     Example: [1, 2, 3, 1, 2] -> {(1, 2): 2, (2, 3): 1, (3, 1): 1}
     Optionally allows to update an existing dictionary of counts
@@ -22,23 +28,26 @@ def get_stats(ids, counts=None):
     return counts
 
 
-def merge(ids, pair, idx):
+def replace_bigram_by_id(ids:List[int], pair:Tuple[int, int], new_idx:int):
     """
+    将ids中的所有的pair替换成new_idx
+
     In the list of integers (ids), replace all consecutive occurrences
     of pair with the new integer token idx
-    Example: ids=[1, 2, 3, 1, 2], pair=(1, 2), idx=4 -> [4, 3, 4]
+    Example: ids=[1, 2, 3, 1, 2], pair=(1, 2), new_idx=4
+        -> [4, 3, 4]
     """
-    newids = []
+    replaced_ids = []
     i = 0
     while i < len(ids):
         # if not at the very last position AND the pair matches, replace it
         if ids[i] == pair[0] and i < len(ids) - 1 and ids[i+1] == pair[1]:
-            newids.append(idx)
-            i += 2
+            replaced_ids.append(new_idx)
+            i += 2  # 指针加2
         else:
-            newids.append(ids[i])
+            replaced_ids.append(ids[i])
             i += 1
-    return newids
+    return replaced_ids
 
 # first two helper functions...
 def replace_control_characters(s: str) -> str:
@@ -50,12 +59,17 @@ def replace_control_characters(s: str) -> str:
     for ch in s:
         if unicodedata.category(ch)[0] != "C":
             chars.append(ch) # this character is ok
-        else:
+        else: # control char
+            # ord(x)获取x的ascii码
+            # 将\n打印成: \\u0010, 否则会真的换行
             chars.append(f"\\u{ord(ch):04x}") # escape
     return "".join(chars)
 
 def render_token(t: bytes) -> str:
     # pretty print a token, escaping control characters
+
+    # 有些字符不能被解码为utf8,使用"�"代替
+    # errors='replace' to replace them with the replacement char �.
     s = t.decode('utf-8', errors='replace')
     s = replace_control_characters(s)
     return s
@@ -68,10 +82,14 @@ class Tokenizer:
 
     def __init__(self):
         # default: vocab size of 256 (all bytes), no merges, no patterns
-        self.merges = {} # (int, int) -> int
+        """
+        [l][o] -> [lo] 491
+        (97, 98 ) -> (491)
+        """
+        self.bigram_merge_table:Dict[(int, int), int] = {} # (int, int) -> int
         self.pattern = "" # str
-        self.special_tokens = {} # str -> int, e.g. {'<|endoftext|>': 100257}
-        self.vocab = self._build_vocab() # int -> bytes
+        self.special_tokens:Dict[str,int] = {} # str -> int, e.g. {'<|endoftext|>': 100257}
+        self.vocab:Dict[int, bytes] = self._build_vocab() # int -> bytes
 
     def train(self, text, vocab_size, verbose=False):
         # Tokenizer can train a vocabulary of size vocab_size from text
@@ -87,11 +105,11 @@ class Tokenizer:
 
     def _build_vocab(self):
         # vocab is simply and deterministically derived from merges
-        vocab = {idx: bytes([idx]) for idx in range(256)}
-        for (p0, p1), idx in self.merges.items():
+        vocab:Dict[int, bytes] = {idx: bytes([idx]) for idx in range(256)} # 32 -> b' ', 48 -> b'0', 65 -> b'A'
+        for (p0, p1), idx in self.bigram_merge_table.items():
             vocab[idx] = vocab[p0] + vocab[p1]
         for special, idx in self.special_tokens.items():
-            vocab[idx] = special.encode("utf-8")
+            vocab[idx] = special.encode("utf-8") # 'endoftext'.encode('utf-8') = b"endoftext"
         return vocab
 
     def save(self, file_prefix):
@@ -108,15 +126,17 @@ class Tokenizer:
             f.write("minbpe v1\n")
             f.write(f"{self.pattern}\n")
             # write the special tokens, first the number of them, then each one
-            f.write(f"{len(self.special_tokens)}\n")
+            f.write(f"{len(self.special_tokens)}\n") # 特殊字符的长度
             for special, idx in self.special_tokens.items():
                 f.write(f"{special} {idx}\n")
+            # 注意：0`256的字符都没有存储
             # the merges dict
-            for idx1, idx2 in self.merges:
+            for idx1, idx2 in self.bigram_merge_table:
                 f.write(f"{idx1} {idx2}\n")
-        # write the vocab: for the human to look at
+
+        # write the vocab: for the human to look at or debug
         vocab_file = file_prefix + ".vocab"
-        inverted_merges = {idx: pair for pair, idx in self.merges.items()}
+        inverted_merges = {idx: pair for pair, idx in self.bigram_merge_table.items()}
         with open(vocab_file, "w", encoding="utf-8") as f:
             for idx, token in self.vocab.items():
                 # note: many tokens may be partial utf-8 sequences
@@ -127,6 +147,7 @@ class Tokenizer:
                 s = render_token(token)
                 # find the children of this token, if any
                 if idx in inverted_merges:
+                    # 由两个子token组合
                     # if this token has children, render it nicely as a merge
                     idx0, idx1 = inverted_merges[idx]
                     s0 = render_token(self.vocab[idx0])
@@ -137,12 +158,12 @@ class Tokenizer:
                     # (this should just be the first 256 tokens, the bytes)
                     f.write(f"[{s}] {idx}\n")
 
-    def load(self, model_file):
+    def load(self, model_file:str):
         """Inverse of save() but only for the model file"""
         assert model_file.endswith(".model")
         # read the model file
-        merges = {}
-        special_tokens = {}
+        merges:Dict[(int,int), int] = {}
+        special_tokens:Dict[str,int] = {} # token ->  index
         idx = 256
         with open(model_file, 'r', encoding="utf-8") as f:
             # read the version
@@ -160,6 +181,7 @@ class Tokenizer:
                 idx1, idx2 = map(int, line.split())
                 merges[(idx1, idx2)] = idx
                 idx += 1
-        self.merges = merges
+
+        self.bigram_merge_table = merges
         self.special_tokens = special_tokens
         self.vocab = self._build_vocab()
