@@ -14,8 +14,8 @@ text = open("tests/taylorswift.txt", "r", encoding="utf-8").read()
 os.makedirs("models", exist_ok=True)
 
 t0 = time.time()
-for TokenizerClass, name in zip([BasicTokenizer, RegexTokenizer], ["basic", "regex"]):
-
+for TokenizerClass, name in zip([BasicTokenizer, RegexTokenizer],
+                                ["basic", "regex"]):
     # construct the Tokenizer object and kick off verbose training
     tokenizer = TokenizerClass()
     tokenizer.train(text, 512, verbose=True)

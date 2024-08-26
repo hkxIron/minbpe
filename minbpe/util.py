@@ -49,6 +49,41 @@ def replace_bigram_by_id(ids:List[int], pair:Tuple[int, int], new_idx:int):
             i += 1
     return replaced_ids
 
+"""
+ids_in_chunk_list: 每个chunk代表一段文本,里面包含很多id list
+"""
+def bigram_merge(ids_in_chunk_list:List[List[int]], num_merges:int, verbose=False):
+    # iteratively merge the most common pairs to create new tokens
+    bigram_merge_table:Dict[(int, int), int] = {} # (int, int) -> int
+    vocab:Dict[int, bytes] = {idx: bytes([idx]) for idx in range(256)} # int -> bytes
+    for i in range(num_merges):
+        # 注意：每次merge中,bigram_count需要重新统计
+        # count the number of times every consecutive pair appears
+        # count up the number of times every consecutive bigram appears
+        # Example: [1, 2, 3, 1, 2] -> {(1, 2): 2, (2, 3): 1, (3, 1): 1}
+        bigram_to_count:Dict[(int,int), int] = {}
+        for ids in ids_in_chunk_list:
+            # passing in stats will update it in place, adding up counts
+            # Example: [1, 2, 3, 1, 2] -> {(1, 2): 2, (2, 3): 1, (3, 1): 1}
+            get_bigram_stats(ids, bigram_to_count)
+        # find the pair with the highest count
+        bigram:Tuple[int, int] = max(bigram_to_count, key=bigram_to_count.get)
+        # mint a new token: assign it the next available id
+        idx = 256 + i
+
+        # replace all occurrences of bigram in ids with idx
+        # Example: ids = [1, 2, 3, 1, 2], bigram = (1, 2), idx = 4
+        # -> [4, 3, 4]
+        # replace all occurrences of pair in ids with idx
+        ids_in_chunk_list = [replace_bigram_by_id(chunk_ids, bigram, idx) for chunk_ids in ids_in_chunk_list]
+        # save the merge
+        bigram_merge_table[bigram] = idx
+        vocab[idx] = vocab[bigram[0]] + vocab[bigram[1]]
+        # prints
+        if verbose:
+            print(f"merge {i+1}/{num_merges}: {bigram} -> {idx}, ({vocab[bigram[0]]},{vocab[bigram[1]]}) ->{vocab[idx]} for {vocab[idx]} had {bigram_to_count[bigram]} occurrences")
+    return bigram_merge_table, vocab
+
 # first two helper functions...
 def replace_control_characters(s: str) -> str:
     # we don't want to print control characters
@@ -90,6 +125,7 @@ class Tokenizer:
         self.pattern = "" # str
         self.special_tokens:Dict[str,int] = {} # str -> int, e.g. {'<|endoftext|>': 100257}
         self.vocab:Dict[int, bytes] = self._build_vocab() # int -> bytes
+
 
     def train(self, text, vocab_size, verbose=False):
         # Tokenizer can train a vocabulary of size vocab_size from text

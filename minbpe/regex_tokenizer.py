@@ -11,7 +11,7 @@ Unlike BasicTokenizer:
 from typing import Dict, Tuple, List
 
 import regex as re
-from .util import Tokenizer, get_bigram_stats, replace_bigram_by_id
+from .util import Tokenizer, get_bigram_stats, replace_bigram_by_id, bigram_merge
 
 
 # the main GPT text split patterns, see
@@ -39,13 +39,18 @@ class RegexTokenizer(Tokenizer):
         num_merges = vocab_size - 256
 
         """
-        提前将文章的段落分开
+        提前将文章用正则切分成多个小片段，基本以'空格+单词'为单位进行切分
+        eg:
+        'Copy paste of the Wikipedia article on Taylor Swift, as---\n\n'
+        切分成下面的list
+        ['Copy', ' paste', ' of', ' the', ' Wikipedia', ' article', ' on', ' Taylor', ' Swift', ',', ' as', '---\n\n']
+        所以，可以看到 gpt3.5,gpt4里都是以 空格 + 单词 作为一个token
         """
         # split the text up into text chunks
-        text_chunks = re.findall(self.compiled_pattern, text)
+        text_chunks:List[str] = re.findall(self.compiled_pattern, text)
 
         # input text preprocessing
-        chunk_id_list = [list(chunk.encode("utf-8")) for chunk in text_chunks]
+        chunk_id_list:List[List[int]] = [list(chunk.encode("utf-8")) for chunk in text_chunks]
 
         # iteratively merge the most common pairs to create new tokens
         bigram_merge_table = {} # (int, int) -> int
@@ -73,6 +78,26 @@ class RegexTokenizer(Tokenizer):
         self.bigram_merge_table = bigram_merge_table # used in encode()
         self.vocab = vocab   # used in decode()
 
+    # def train(self, text:str, vocab_size:int, verbose=False):
+    #     assert vocab_size >= 256
+    #     num_merges = vocab_size - 256
+    #
+    #     """
+    #     提前将文章用正则切分成多个小片段，基本以'空格+单词'为单位进行切分
+    #     eg:
+    #     'Copy paste of the Wikipedia article on Taylor Swift, as---\n\n'
+    #     切分成下面的list
+    #     ['Copy', ' paste', ' of', ' the', ' Wikipedia', ' article', ' on', ' Taylor', ' Swift', ',', ' as', '---\n\n']
+    #     所以，可以看到 gpt3.5,gpt4里都是以 空格 + 单词 作为一个token
+    #     """
+    #     # split the text up into text chunks
+    #     text_chunks:List[str] = re.findall(self.compiled_pattern, text)
+    #     # input text preprocessing
+    #     chunk_id_list:List[List[int]] = [list(chunk.encode("utf-8")) for chunk in text_chunks]
+    #     merge_table, vocab = bigram_merge(chunk_id_list, num_merges, verbose)
+    #     self.bigram_merge_table:Dict[(int, int), int] = merge_table # used in encode()
+    #     self.vocab:Dict[int, bytes] = vocab   # used in decode()
+
     def register_special_tokens(self, special_tokens:Dict[str, int] ):
         # special_tokens is a dictionary of str -> int
         # example: {"<|endoftext|>": 100257}
@@ -85,7 +110,7 @@ class RegexTokenizer(Tokenizer):
         for idx in ids:
             if idx in self.vocab:
                 part_bytes.append(self.vocab[idx])
-            elif idx in self.inverse_special_tokens:
+            elif idx in self.inverse_special_tokens: # id为special_token,直接查special_token表
                 part_bytes.append(self.inverse_special_tokens[idx].encode("utf-8"))
             else:
                 raise ValueError(f"invalid token id: {idx}")
