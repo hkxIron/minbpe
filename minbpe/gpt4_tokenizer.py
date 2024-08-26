@@ -5,7 +5,7 @@ loads the pretrained tokenizer from the `cl100k_base` tokenizer of tiktoken.
 """
 
 import tiktoken
-from .regex import RegexTokenizer
+from .regex_tokenizer import RegexTokenizer
 
 
 def bpe(mergeable_ranks, token, max_rank):
@@ -111,7 +111,7 @@ class GPT4Tokenizer(RegexTokenizer):
         # in the exact same format as the base class would.
         # simple run as:
         # python -c "from minbpe import GPT4Tokenizer; GPT4Tokenizer().save_vocab('gpt4.vocab')"
-        from .base import render_token
+        from .util import render_token
         # build vocab being mindful of the byte shuffle
         vocab = {idx: bytes([self.inverse_byte_shuffle[idx]]) for idx in range(256)}
         for (p0, p1), idx in self.merges.items():

@@ -9,7 +9,7 @@ But:
 - Does not handle any special tokens.
 """
 
-from .base import Tokenizer, get_bigram_stats, replace_bigram_by_id
+from .util import Tokenizer, get_bigram_stats, replace_bigram_by_id
 from typing import List,Optional,Dict,Tuple
 
 
@@ -53,7 +53,7 @@ class BasicTokenizer(Tokenizer):
             vocab[idx] = vocab[bigram[0]] + vocab[bigram[1]] # 两个btypes直接相加
             # prints
             if verbose:
-                print(f"merge {i+1}/{num_merges}: {bigram} -> {idx}, ({vocab[bigram[0]]},{vocab[bigram[1]]}->{vocab[idx]}) for {vocab[idx]} had {bigram_to_count[bigram]} occurrences")
+                print(f"merge {i+1}/{num_merges}: {bigram} -> {idx}, ({vocab[bigram[0]]},{vocab[bigram[1]]})->{vocab[idx]} for {vocab[idx]} had {bigram_to_count[bigram]} occurrences")
 
         # save class variables
         # merges_table:value的值越小代表pair在语料中出现得越频繁
@@ -78,15 +78,22 @@ class BasicTokenizer(Tokenizer):
         while len(ids) >= 2:
             # find the bigram with the lowest merge index
             bigram_to_count:Dict[(int, int), int] = get_bigram_stats(ids)
-            # 从ids中获取这样的pair,该pair在merge_table中具有最小的idx, 这样的idx是train时在语料中出现最频繁的bigram
+            """
+            从ids中获取这样的pair,该pair在merge_table中具有最小的idx, 这样的idx是train时在语料中出现最频繁的bigram,
+            即是最早合并的bigram
+            """
             bigram = min(bigram_to_count, key=lambda p: self.bigram_merge_table.get(p, float("inf")))
+
             # subtle: if there are no more merges available, the key will
             # result in an inf for every single bigram, and the min will be
             # just the first bigram in the list, arbitrarily
             # we can detect this terminating case by a membership check
+
+            # 直到所有的bigram不能再合并就停止encode
             if bigram not in self.bigram_merge_table:
                 break # nothing else can be merged anymore
 
+            # 在merge_table中找到bigram对应的idx, 然后根据idx进行合并
             # otherwise let's merge the best bigram (lowest merge index)
             idx = self.bigram_merge_table[bigram]
             ids = replace_bigram_by_id(ids, bigram, idx)

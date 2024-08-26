@@ -11,7 +11,7 @@ Unlike BasicTokenizer:
 from typing import Dict, Tuple, List
 
 import regex as re
-from .base import Tokenizer, get_bigram_stats, replace_bigram_by_id
+from .util import Tokenizer, get_bigram_stats, replace_bigram_by_id
 
 
 # the main GPT text split patterns, see
@@ -52,12 +52,12 @@ class RegexTokenizer(Tokenizer):
         vocab = {idx: bytes([idx]) for idx in range(256)} # idx -> bytes
         for i in range(num_merges):
             # count the number of times every consecutive pair appears
-            stats = {}
+            bigram_to_count = {}
             for chunk_ids in chunk_id_list:
                 # passing in stats will update it in place, adding up counts
-                get_bigram_stats(chunk_ids, stats)
+                get_bigram_stats(chunk_ids, bigram_to_count)
             # find the pair with the highest count
-            bigram:Tuple[int, int] = max(stats, key=stats.get)
+            bigram:Tuple[int, int] = max(bigram_to_count, key=bigram_to_count.get)
             # mint a new token: assign it the next available id
             idx = 256 + i
             # replace all occurrences of pair in ids with idx
@@ -67,7 +67,7 @@ class RegexTokenizer(Tokenizer):
             vocab[idx] = vocab[bigram[0]] + vocab[bigram[1]]
             # prints
             if verbose:
-                print(f"merge {i+1}/{num_merges}: {bigram} -> {idx} ({vocab[idx]}) had {stats[bigram]} occurrences")
+                print(f"merge {i+1}/{num_merges}: {bigram} -> {idx}, ({vocab[bigram[0]]},{vocab[bigram[1]]}) ->{vocab[idx]} for {vocab[idx]} had {bigram_to_count[bigram]} occurrences")
 
         # save class variables
         self.bigram_merge_table = bigram_merge_table # used in encode()
