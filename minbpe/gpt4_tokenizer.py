@@ -10,42 +10,45 @@ from .regex_tokenizer import RegexTokenizer
 from .util import merge_bigram_by_table
 
 
-def bpe(mergeable_ranks:Dict[Tuple[int,int], int], tokens:List[int], max_rank:int):
+def byte_pair_encode(mergeable_ranks:Dict[bytes, int], pair_bytes:bytes, max_rank:int)->List[bytes]:
+    # 将
     # helper function used in get_gpt4_merges() to reconstruct the merge forest
-    parts:List[bytes] = [bytes([b]) for b in tokens]
+    byte_list:List[bytes] = [bytes([b]) for b in pair_bytes]
+    # 寻找byte的bigram
     while True:
         min_idx = None
         min_rank = None
-        for i, pair in enumerate(zip(parts[:-1], parts[1:])):
-            rank = mergeable_ranks.get(pair[0] + pair[1])
+        for i, bigram in enumerate(zip(byte_list[:-1], byte_list[1:])):
+            rank = mergeable_ranks.get(bigram[0] + bigram[1])
             if rank is not None and (min_rank is None or rank < min_rank):
                 min_idx = i
                 min_rank = rank
         if min_rank is None or (max_rank is not None and min_rank >= max_rank):
             break
         assert min_idx is not None
-        parts = parts[:min_idx] + [parts[min_idx] + parts[min_idx + 1]] + parts[min_idx + 2:]
-    return parts
+        byte_bigram = byte_list[min_idx] + byte_list[min_idx + 1]
+        byte_list = byte_list[:min_idx] + [byte_bigram] + byte_list[min_idx + 2:]
 
+    return byte_list
 
-def recover_merges(mergeable_ranks:dict[bytes, int]):
+def recover_merge_table(mergeable_ranks:dict[bytes, int]):
     # the `bigram_merge_table` are already the byte sequences in their merged state.
     # so we have to recover the original pairings. We can do this by doing
     # a small BPE training run on all the tokens, in their order.
     # also see https://github.com/openai/tiktoken/issues/60
     # also see https://github.com/karpathy/minbpe/issues/11#issuecomment-1950805306
-    merges = {}
+    bigram_merge_table:Dict[Tuple[int,int], int] = {}
     for token, rank in mergeable_ranks.items():
         if len(token) == 1:
             continue # skip raw bytes
-        pair = tuple(bpe(mergeable_ranks, token, max_rank=rank))
+        pair = tuple(byte_pair_encode(mergeable_ranks, pair_bytes=token, max_rank=rank))
         assert len(pair) == 2
         # recover the integer ranks of the pair
-        ix0 = mergeable_ranks[pair[0]]
-        ix1 = mergeable_ranks[pair[1]]
-        merges[(ix0, ix1)] = rank
+        ix0:int = mergeable_ranks[pair[0]]
+        ix1:int = mergeable_ranks[pair[1]]
+        bigram_merge_table[(ix0, ix1)] = rank
 
-    return merges
+    return bigram_merge_table
 
 GPT4_SPLIT_PATTERN = r"""'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]++[\r\n]*|\s*[\r\n]|\s+(?!\S)|\s+"""
 GPT4_SPECIAL_TOKENS = {
@@ -65,7 +68,7 @@ class GPT4Tokenizer(RegexTokenizer):
         enc = tiktoken.get_encoding("cl100k_base")
         mergeable_ranks:dict[bytes, int] = enc._mergeable_ranks
         # the bigram_merge_table are those of gpt4, but we have to recover them
-        self.bigram_merge_table = recover_merges(mergeable_ranks)
+        self.bigram_merge_table = recover_merge_table(mergeable_ranks)
         # reconstruct the vocab from the bigram_merge_table
         vocab = {idx: bytes([idx]) for idx in range(256)}
         for (p0, p1), idx in self.bigram_merge_table.items():

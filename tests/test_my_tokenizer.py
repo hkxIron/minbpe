@@ -170,14 +170,15 @@ def test_gpt4_tokenizer():
     }
     tokenizer = GPT4Tokenizer()
     gpt4_tokenizer_ids = tokenizer.encode(specials_string, allowed_special="all")
-    tokenizer.save_vocab("../models/gpt4.vocab")
+    #tokenizer.save_vocab("../models/gpt4.vocab")
+    print(gpt4_tokenizer_ids)
 
 
 if __name__ == "__main__":
     print(dir())
+    test_gpt4_tokenizer()
     test_tokenizer2()
     test_regex_tokenizer()
     unicode_test()
     test_tokenizer()
     test_regex_with_special()
-    test_gpt4_tokenizer()
