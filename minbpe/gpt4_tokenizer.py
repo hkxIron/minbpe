@@ -3,14 +3,16 @@ Implements the GPT-4 Tokenizer as a light wrapper around the RegexTokenizer.
 Note that this is a pretrained tokenizer. By default and inside init(), it
 loads the pretrained tokenizer from the `cl100k_base` tokenizer of tiktoken.
 """
+from typing import *
 
 import tiktoken
 from .regex_tokenizer import RegexTokenizer
+from .util import merge_bigram_by_table
 
 
-def bpe(mergeable_ranks, token, max_rank):
+def bpe(mergeable_ranks:Dict[Tuple[int,int], int], tokens:List[int], max_rank:int):
     # helper function used in get_gpt4_merges() to reconstruct the merge forest
-    parts = [bytes([b]) for b in token]
+    parts:List[bytes] = [bytes([b]) for b in tokens]
     while True:
         min_idx = None
         min_rank = None
@@ -26,8 +28,8 @@ def bpe(mergeable_ranks, token, max_rank):
     return parts
 
 
-def recover_merges(mergeable_ranks):
-    # the `merges` are already the byte sequences in their merged state.
+def recover_merges(mergeable_ranks:dict[bytes, int]):
+    # the `bigram_merge_table` are already the byte sequences in their merged state.
     # so we have to recover the original pairings. We can do this by doing
     # a small BPE training run on all the tokens, in their order.
     # also see https://github.com/openai/tiktoken/issues/60
@@ -59,20 +61,26 @@ class GPT4Tokenizer(RegexTokenizer):
 
     def __init__(self):
         super().__init__(pattern=GPT4_SPLIT_PATTERN)
-        # get the official tokenizer and its merges
+        # get the official tokenizer and its bigram_merge_table
         enc = tiktoken.get_encoding("cl100k_base")
-        mergeable_ranks = enc._mergeable_ranks
-        # the merges are those of gpt4, but we have to recover them
-        self.merges = recover_merges(mergeable_ranks)
-        # reconstruct the vocab from the merges
+        mergeable_ranks:dict[bytes, int] = enc._mergeable_ranks
+        # the bigram_merge_table are those of gpt4, but we have to recover them
+        self.bigram_merge_table = recover_merges(mergeable_ranks)
+        # reconstruct the vocab from the bigram_merge_table
         vocab = {idx: bytes([idx]) for idx in range(256)}
-        for (p0, p1), idx in self.merges.items():
+        for (p0, p1), idx in self.bigram_merge_table.items():
             vocab[idx] = vocab[p0] + vocab[p1]
         self.vocab = vocab
+
         # now here is another tricky part.
         # for some reason, the tokens corresponding to individual bytes
         # are permuted in a different order. This is completely non-sensical
         # and probably historical, but therefore we have to deal with it here.
+        """
+        bytes([48]), 将整数转为对应的 bytes
+        >>> bytes([48])
+        b'0'
+        """
         self.byte_shuffle = {i: mergeable_ranks[bytes([i])] for i in range(256)}
         self.inverse_byte_shuffle = {v: k for k, v in self.byte_shuffle.items()}
         # finally register the special tokens
@@ -81,7 +89,8 @@ class GPT4Tokenizer(RegexTokenizer):
     def _encode_chunk(self, text_bytes):
         # before we start processing bytes, we have to permute them
         text_bytes = bytes(self.byte_shuffle[b] for b in text_bytes)
-        ids = super()._encode_chunk(text_bytes)
+        #ids = super()._encode_chunk(text_bytes)
+        ids = merge_bigram_by_table(list(text_bytes), self.bigram_merge_table)
         return ids
 
     def decode(self, ids):
@@ -114,10 +123,10 @@ class GPT4Tokenizer(RegexTokenizer):
         from .util import render_token
         # build vocab being mindful of the byte shuffle
         vocab = {idx: bytes([self.inverse_byte_shuffle[idx]]) for idx in range(256)}
-        for (p0, p1), idx in self.merges.items():
+        for (p0, p1), idx in self.bigram_merge_table.items():
             vocab[idx] = vocab[p0] + vocab[p1]
         # now merge the shuffled bytes and write to file
-        inverted_merges = {idx: pair for pair, idx in self.merges.items()}
+        inverted_merges = {idx: pair for pair, idx in self.bigram_merge_table.items()}
         with open(vocab_file, "w", encoding="utf-8") as f:
             for idx, token in vocab.items():
                 s = render_token(token)

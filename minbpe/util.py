@@ -8,7 +8,7 @@ some concessions are made for simplicity.
 BPE算法：The BPE algorithm is "byte-level" because it runs on UTF-8 encoded strings
 """
 import unicodedata
-from typing import List,Optional,Dict,Tuple
+from typing import List,Optional,Dict,Tuple, Any
 
 
 # -----------------------------------------------------------------------------
@@ -55,9 +55,10 @@ ids_in_chunk_list: 每个chunk代表一段文本,里面包含很多id list
 def bigram_merge(ids_in_chunk_list:List[List[int]], num_merges:int, verbose=False):
     # iteratively merge the most common pairs to create new tokens
     bigram_merge_table:Dict[(int, int), int] = {} # (int, int) -> int
+    # id转bytes
     vocab:Dict[int, bytes] = {idx: bytes([idx]) for idx in range(256)} # int -> bytes
     for i in range(num_merges):
-        # 注意：每次merge中,bigram_count需要重新统计
+        # 注意：每次merge中,bigram_to_count需要重新统计
         # count the number of times every consecutive pair appears
         # count up the number of times every consecutive bigram appears
         # Example: [1, 2, 3, 1, 2] -> {(1, 2): 2, (2, 3): 1, (3, 1): 1}
@@ -66,11 +67,16 @@ def bigram_merge(ids_in_chunk_list:List[List[int]], num_merges:int, verbose=Fals
             # passing in stats will update it in place, adding up counts
             # Example: [1, 2, 3, 1, 2] -> {(1, 2): 2, (2, 3): 1, (3, 1): 1}
             get_bigram_stats(ids, bigram_to_count)
+
         # find the pair with the highest count
         bigram:Tuple[int, int] = max(bigram_to_count, key=bigram_to_count.get)
+
         # mint a new token: assign it the next available id
         idx = 256 + i
 
+        """
+        将所有的bigram替换为new_id
+        """
         # replace all occurrences of bigram in ids with idx
         # Example: ids = [1, 2, 3, 1, 2], bigram = (1, 2), idx = 4
         # -> [4, 3, 4]
@@ -78,11 +84,36 @@ def bigram_merge(ids_in_chunk_list:List[List[int]], num_merges:int, verbose=Fals
         ids_in_chunk_list = [replace_bigram_by_id(chunk_ids, bigram, idx) for chunk_ids in ids_in_chunk_list]
         # save the merge
         bigram_merge_table[bigram] = idx
-        vocab[idx] = vocab[bigram[0]] + vocab[bigram[1]]
+        vocab[idx] = vocab[bigram[0]] + vocab[bigram[1]] # 直接将bytes进行相加
         # prints
         if verbose:
             print(f"merge {i+1}/{num_merges}: {bigram} -> {idx}, ({vocab[bigram[0]]},{vocab[bigram[1]]}) ->{vocab[idx]} for {vocab[idx]} had {bigram_to_count[bigram]} occurrences")
     return bigram_merge_table, vocab
+
+def merge_bigram_by_table(ids:List[int], bigram_merge_table:Dict[Tuple[int, int],int])->List[int]:
+    while len(ids) >= 2:
+        # find the bigram with the lowest merge index
+        bigram_to_count:Dict[(int, int), int] = get_bigram_stats(ids)
+        """
+        从ids中获取这样的pair,该pair在merge_table中具有最小的idx, 这样的idx是train时在语料中出现最频繁的bigram,
+        即是最早合并的bigram
+        """
+        bigram:Tuple[(int,int)] = min(bigram_to_count, key=lambda p: bigram_merge_table.get(p, float("inf")))
+
+        # subtle: if there are no more bigram_merge_table available, the key will
+        # result in an inf for every single bigram, and the min will be
+        # just the first bigram in the list, arbitrarily
+        # we can detect this terminating case by a membership check
+
+        # 直到所有的bigram不能再合并就停止encode
+        if bigram not in bigram_merge_table:
+            break # nothing else can be merged anymore
+
+        # 在merge_table中找到bigram对应的idx, 然后根据idx进行合并
+        # otherwise let's merge the best bigram (lowest merge index)
+        idx = bigram_merge_table[bigram]
+        ids = replace_bigram_by_id(ids, bigram, idx)
+    return ids
 
 # first two helper functions...
 def replace_control_characters(s: str) -> str:
@@ -102,7 +133,6 @@ def replace_control_characters(s: str) -> str:
 
 def render_token(t: bytes) -> str:
     # pretty print a token, escaping control characters
-
     # 有些字符不能被解码为utf8,使用"�"代替
     # errors='replace' to replace them with the replacement char �.
     s = t.decode('utf-8', errors='replace')
@@ -116,7 +146,7 @@ class Tokenizer:
     """Base class for Tokenizers"""
 
     def __init__(self):
-        # default: vocab size of 256 (all bytes), no merges, no patterns
+        # default: vocab size of 256 (all bytes), no bigram_merge_table, no patterns
         """
         [l][o] -> [lo] 491
         (97, 98 ) -> (491)
@@ -126,6 +156,8 @@ class Tokenizer:
         self.special_tokens:Dict[str,int] = {} # str -> int, e.g. {'<|endoftext|>': 100257}
         self.vocab:Dict[int, bytes] = self._build_vocab() # int -> bytes
 
+    def __len__(self):
+        return len(self.vocab) + len(self.special_tokens)
 
     def train(self, text, vocab_size, verbose=False):
         # Tokenizer can train a vocabulary of size vocab_size from text
@@ -140,7 +172,7 @@ class Tokenizer:
         raise NotImplementedError
 
     def _build_vocab(self):
-        # vocab is simply and deterministically derived from merges
+        # vocab is simply and deterministically derived from bigram_merge_table
         vocab:Dict[int, bytes] = {idx: bytes([idx]) for idx in range(256)} # 32 -> b' ', 48 -> b'0', 65 -> b'A'
         for (p0, p1), idx in self.bigram_merge_table.items():
             vocab[idx] = vocab[p0] + vocab[p1]
@@ -158,7 +190,7 @@ class Tokenizer:
         # write the model: to be used in load() later
         model_file = file_prefix + ".model"
         with open(model_file, 'w') as f:
-            # write the version, pattern and merges, that's all that's needed
+            # write the version, pattern and bigram_merge_table, that's all that's needed
             f.write("minbpe v1\n")
             f.write(f"{self.pattern}\n")
             # write the special tokens, first the number of them, then each one
@@ -166,7 +198,7 @@ class Tokenizer:
             for special, idx in self.special_tokens.items():
                 f.write(f"{special} {idx}\n")
             # 注意：0`256的字符都没有存储
-            # the merges dict
+            # the bigram_merge_table dict
             for idx1, idx2 in self.bigram_merge_table:
                 f.write(f"{idx1} {idx2}\n")
 
@@ -212,7 +244,7 @@ class Tokenizer:
             for _ in range(num_special):
                 special, special_idx = f.readline().strip().split()
                 special_tokens[special] = int(special_idx)
-            # read the merges
+            # read the bigram_merge_table
             for line in f:
                 idx1, idx2 = map(int, line.split())
                 merges[(idx1, idx2)] = idx

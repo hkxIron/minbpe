@@ -86,7 +86,7 @@ def test_wikipedia_example(tokenizer_factory):
     According to Wikipedia, running bpe on the input string:
     "aaabdaaabac"
 
-    for 3 merges will result in string:
+    for 3 bigram_merge_table will result in string:
     "XdXac"
 
     where:
@@ -110,7 +110,7 @@ def test_wikipedia_example(tokenizer_factory):
 def test_save_load(special_tokens):
     # take a bit more complex piece of text and train the tokenizer, chosen at random
     text = llama_text
-    # create a Tokenizer and do 64 merges
+    # create a Tokenizer and do 64 bigram_merge_table
     tokenizer = RegexTokenizer()
     tokenizer.train(text, 256 + 64)
     tokenizer.register_special_tokens(special_tokens)
