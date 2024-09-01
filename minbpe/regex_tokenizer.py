@@ -98,7 +98,7 @@ class RegexTokenizer(Tokenizer):
         self.bigram_merge_table:Dict[Tuple[int, int], int] = merge_table # used in encode()
         self.vocab:Dict[int, bytes] = vocab   # used in decode()
 
-    def register_special_tokens(self, special_tokens:Set[str]):
+    def register_special_tokens_set(self, special_tokens:Set[str]):
         vocab_size = len(self.vocab)
         token2id = {t:i+vocab_size for i,t in enumerate(special_tokens)}
         self.register_special_tokens(token2id)
