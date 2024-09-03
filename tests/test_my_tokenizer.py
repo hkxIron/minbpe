@@ -173,12 +173,44 @@ def test_gpt4_tokenizer():
     #tokenizer.save_vocab("../models/gpt4.vocab")
     print(gpt4_tokenizer_ids)
 
+@my_decorator_gen(need_test=True)
+def test_regex_tokenizer_zh():
+    tokenizer = RegexTokenizer()
+
+    text = """由于《西游记》剧情走向对大部分中国人来说耳熟能详，冯骥与扬奇等人就剧本进行多次迭代，最终决定以“寻根之旅”为核心进行剧情展开。游戏主角“天命人”一路上会遇到很多《西游记》里出现过的著名角色，通过与他们战斗，或是成为伙伴，玩家再去尝试搞清楚“悟空是谁”以及“我是谁” [43]。
+在设计游戏环境过程中，由于自然景观缺乏现实的中式素材，开发团队与各地文保部门合作前往实地考察，对陵川二仙庙，晋城青莲寺等现实古建筑和塑像进行扫描，以此为蓝本进行重视建筑的设计 [45]。为了让场景更为逼真，采用虚幻5引擎和NVIDIA光线追踪等技术以提升画面效果"""
+    tokenizer.train(text, vocab_size=256 + 50, verbose=True)  # 256 are the byte tokens, then do 3 bigram_merge_table
+
+    print("bigram_merge_table:")
+    print(tokenizer.bigram_merge_table)
+    print("vocab:")
+    print(tokenizer.vocab)
+    # 一般中文utf8 占3个bytes
+    # 可以看到有部分中文字编码为一个新token
+    print("vocab decode:")
+    for index, vocab_bytes in tokenizer.vocab.items():
+        print(f"{index} bytes:{vocab_bytes} char:{vocab_bytes.decode('utf-8', errors='replace')}")
+    """
+    结果如下：
+    277 bytes:b'\xe8\xbf\x9b' char:进
+    278 bytes:b'\xe8\xbf\x9b\xe8' char:进�
+    279 bytes:b'\xe8\xbf\x9b\xe8\xa1' char:进�
+    280 bytes:b'\xe8\xbf\x9b\xe8\xa1\x8c' char:进行
+    281 bytes:b'\xe4\xbb\xa5' char:以
+    282 bytes:b'\xe2\x80\x9c' char:“
+    """
+
+    text="剧情走向对大部分中国人来说耳熟能详"
+    ids = tokenizer.encode(text)
+    print(f"ids:{ids}")
 
 if __name__ == "__main__":
     print(dir())
-    test_gpt4_tokenizer()
-    test_tokenizer2()
-    test_regex_tokenizer()
-    unicode_test()
-    test_tokenizer()
-    test_regex_with_special()
+    if False:
+        test_gpt4_tokenizer()
+        test_tokenizer2()
+        test_regex_tokenizer()
+        unicode_test()
+        test_tokenizer()
+        test_regex_with_special()
+    test_regex_tokenizer_zh()
