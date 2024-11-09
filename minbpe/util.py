@@ -243,7 +243,7 @@ class Tokenizer:
         # read the model file
         merges:Dict[(int,int), int] = {}
         special_tokens:Dict[str,int] = {} # token ->  index
-        idx = 256
+        index = 256
         with open(model_file, 'r', encoding="utf-8") as f:
             # read the version
             version = f.readline().strip()
@@ -258,8 +258,8 @@ class Tokenizer:
             # read the bigram_merge_table
             for line in f:
                 idx1, idx2 = map(int, line.split())
-                merges[(idx1, idx2)] = idx
-                idx += 1
+                merges[(idx1, idx2)] = index
+                index += 1
 
         self.bigram_merge_table = merges
         self.special_tokens = special_tokens
