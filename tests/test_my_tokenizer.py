@@ -206,11 +206,11 @@ def test_regex_tokenizer_zh():
 
 if __name__ == "__main__":
     print(dir())
+    test_tokenizer2()
     if False:
         test_gpt4_tokenizer()
-        test_tokenizer2()
         test_regex_tokenizer()
         unicode_test()
         test_tokenizer()
         test_regex_with_special()
-    test_regex_tokenizer_zh()
+        test_regex_tokenizer_zh()

@@ -23,7 +23,7 @@ class BasicTokenizer(Tokenizer):
         """
         一个中文字符一般需要3个byte
         >>> "你好".encode('utf8')
-        b'\xe4\xbd\xa0\xe5\xa5\xbd'
+        b'\xe4\xbd \xa0\xe5 \xa5\xbd'
         >>> list("你好".encode('utf8'))
         [228, 189, 160, 229, 165, 189]
         """
@@ -35,12 +35,14 @@ class BasicTokenizer(Tokenizer):
         ids = list(text_bytes) # list of integers in range 0..255
         merge_table, vocab = bigram_merge(list([ids]), num_merges, verbose)
         self.bigram_merge_table:Dict[Tuple[int, int], int] = merge_table # used in encode()
+        # token_id -> bytes
         self.vocab:Dict[int, bytes] = vocab   # used in decode()
 
     def decode(self, ids:List[int])->str:
         # given ids (list of integers), return Python string
         text_bytes:bytes = b"".join(self.vocab[idx] for idx in ids)
-        text:str = text_bytes.decode("utf-8", errors="replace")
+        # 不一定所有的bytes组合在一起都可以组成合法的utf8编码，因此有的会有错误, 正常情况下，llm训练得当，并不会输出此类在语料中未曾出现的byte pair
+        text:str = text_bytes.decode("utf-8", errors="replace") # errors='replace' to replace them with the replacement char �.
         return text
 
     def encode(self, text:str)->List[int]:
